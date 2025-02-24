@@ -1,6 +1,6 @@
 ## Fake IMU for Go 2 (unitree)
 
-This code fakes the accelerometer and gyoscope part of the /lowstate ros2 topic of the Go2 robot.
+This code fakes the accelerometer and gyoscope part of the ```/lowstate``` ros2 topic of the Go2 robot.
 
 For now the linear acceleration and angular velocity are decoupled.
 
