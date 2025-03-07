@@ -4,7 +4,7 @@
 #include <random>
 
 #define PUBLISHING_FREQ 500 //Hz
-#define RUN_TIME 1 //sec
+#define RUN_TIME 1000 //sec
 #define DEBUG 0
 
 class ImuOutput 
@@ -15,8 +15,8 @@ class ImuOutput
             this->value << 0,0,0;
             this->bias << 0,0,0;
             this->noise << 0,0,0;
-            this->mean << 0,0,0;
-            this->standard_dev << 0,0,0;
+            this->noise_mean << 0,0,0;
+            this->noise_standard_dev << 0,0,0;
             this->bias_mean << 0,0,0;
             this->bias_standard_dev << 0,0,0;
             
@@ -25,8 +25,8 @@ class ImuOutput
         Eigen::Vector3d value;
         Eigen::Vector3d bias;
         Eigen::Vector3d noise;
-        Eigen::Vector3d mean;
-        Eigen::Vector3d standard_dev;
+        Eigen::Vector3d noise_mean;
+        Eigen::Vector3d noise_standard_dev;
         Eigen::Vector3d bias_mean;
         Eigen::Vector3d bias_standard_dev;  
 };
@@ -54,8 +54,16 @@ class FakeImuNode : public rclcpp::Node
             this->fake_a_ << 0,0,0;
             this->fake_g_ << 0,0,0;
 
-            a_.value << 1,1,1;
-            a_.standard_dev << 0.001,0.001,0.001;
+            this->msg_tick = 0;
+
+            a_.value << 0,0,0;
+            a_.noise_mean << -0.139, 0.0291, -0.21;
+            a_.noise_standard_dev << 0.0463, 0.05, 0.043;
+            a_.bias_mean << 0,0,0; //-0.20, 0, 0;
+            a_.bias_standard_dev <<0,0,0; // 0.0023, 0, 0;
+            
+            g_.noise_mean << -0.0012,-0.0007, -0.0004;
+            g_.noise_standard_dev << 0.0089,0.0081,0.0083;
 
         
             RCLCPP_INFO_STREAM(this->get_logger(),"\nParameters:\n"<<
@@ -63,8 +71,8 @@ class FakeImuNode : public rclcpp::Node
                                 "\tvalue: "<<a_.value.transpose()<<"\n"<<
                                 "\tbias: "<<a_.bias.transpose()<<"\n"<<
                                 "\tnoise: "<<a_.noise.transpose()<<"\n"<<
-                                "\tmean: "<<a_.mean.transpose()<<"\n"<<
-                                "\tstandard deviation: "<<a_.standard_dev.transpose()<<"\n"<<
+                                "\tmean: "<<a_.noise_mean.transpose()<<"\n"<<
+                                "\tstandard deviation: "<<a_.noise_standard_dev.transpose()<<"\n"<<
                                 "\tbias mean: "<<a_.bias_mean.transpose()<<"\n"<<
                                 "\tbias standard deviation: "<<a_.bias_standard_dev.transpose()<<"\n"<<
 
@@ -72,8 +80,8 @@ class FakeImuNode : public rclcpp::Node
                                 "\tvalue: "<<g_.value.transpose()<<"\n"<<
                                 "\tbias: "<<g_.bias.transpose()<<"\n"<<
                                 "\tnoise: "<<g_.noise.transpose()<<"\n"<<
-                                "\tmean: "<<g_.mean.transpose()<<"\n"<<
-                                "\tstandard deviation: "<<g_.standard_dev.transpose()<<"\n"<<
+                                "\tmean: "<<g_.noise_mean.transpose()<<"\n"<<
+                                "\tstandard deviation: "<<g_.noise_standard_dev.transpose()<<"\n"<<
                                 "\tbias mean: "<<g_.bias_mean.transpose()<<"\n"<<
                                 "\tbias standard deviation: "<<g_.bias_standard_dev.transpose()<<"\n"
                                 );  
@@ -91,6 +99,10 @@ class FakeImuNode : public rclcpp::Node
                 lowstate_msg.imu_state.gyroscope[i] = fake_g_[i];
             }
 
+            this->msg_tick = this->msg_tick + (1.0/PUBLISHING_FREQ)*1000;
+
+            lowstate_msg.tick = this->msg_tick;
+
             lowstate_publisher_->publish(lowstate_msg);       
         }
 
@@ -107,13 +119,14 @@ class FakeImuNode : public rclcpp::Node
             // fill noises values
             for(int i = 0; i < 3 ; i++)
             {
-                a_.noise[i] = get_rand(a_.mean[i],a_.standard_dev[i]);
+                a_.noise[i] = get_rand(a_.noise_mean[i],a_.noise_standard_dev[i]);
                 a_.bias[i] = get_rand(a_.bias_mean[i],a_.bias_standard_dev[i]);
 
-                g_.noise[i] = get_rand(g_.mean[i],g_.standard_dev[i]);
+                g_.noise[i] = get_rand(g_.noise_mean[i],g_.noise_standard_dev[i]);
                 g_.bias[i] = get_rand(g_.bias_mean[i],g_.bias_standard_dev[i]);
             }
 
+            // fill out
             fake_a_ = a_.value + a_.bias - ( R_ * gravity_) + a_.noise ;
             fake_g_ = g_.value + g_.bias + g_.noise; 
 
@@ -146,6 +159,7 @@ class FakeImuNode : public rclcpp::Node
         Eigen::Vector3d fake_g_;
         ImuOutput a_;
         ImuOutput g_;
+        int msg_tick;
 
 
 
