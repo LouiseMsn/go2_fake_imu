@@ -10,12 +10,12 @@ def generate_launch_description():
     gravity_arg = DeclareLaunchArgument(
                 'gravity',
                 default_value=TextSubstitution(text='1'),
-                description='1 or 0 : enables or not the gravity.'
+                description='1 or 0 : Enables or not the gravity.'
     )
     debug_arg = DeclareLaunchArgument(
                 'debug',
                 default_value=TextSubstitution(text='0'),
-                description='1 or 0 : enables debug output.'
+                description='1 or 0 : Enables debug output.'
     )
     publishing_freq_arg = DeclareLaunchArgument(
                 'pub_freq',
