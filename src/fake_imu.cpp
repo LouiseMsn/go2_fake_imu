@@ -3,9 +3,11 @@
 #include <Eigen/Dense>
 #include <random>
 
-#define PUBLISHING_FREQ 500 //Hz
-#define RUN_TIME 1000 //sec
-#define DEBUG 0
+#include <math.h>
+#define _USE_MATH_DEFINES
+
+
+
 
 class ImuOutput 
 {
@@ -37,25 +39,43 @@ class FakeImuNode : public rclcpp::Node
         FakeImuNode()
         : Node("fake_imu")
         {
+            this->declare_parameter("gravity", 1);
+            this->declare_parameter("debug", 1);
+            this->declare_parameter("pub_freq", 500);
+            this->declare_parameter("run_time", 10);
+
+            this->gravity_switch = this->get_parameter("gravity").as_int();
+            this->debug_switch = this->get_parameter("debug").as_int();
+            this->publishing_freq = this->get_parameter("pub_freq").as_int();
+            this->run_time = this->get_parameter("run_time").as_int();
+
             RCLCPP_INFO_STREAM(this->get_logger(),"\nGo2 fake IMU lanched with parameters:\n"<<
-            "Publishing Frequency: "<< PUBLISHING_FREQ << "Hz\n"<<
-            "Run time: "<< RUN_TIME << "s");
+            "Publishing Frequency: "<< publishing_freq << "Hz\n"<<
+            "Run time: "<< run_time << "s\n" <<"Gravity:"<< gravity_switch);
 
             // ROS2
             lowstate_publisher_ = this->create_publisher<unitree_go::msg::LowState>("lowstate",10);
-            pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000/PUBLISHING_FREQ), std::bind(&FakeImuNode::pub_callback,this));
-            timeout_timer_ = this->create_wall_timer(std::chrono::seconds(RUN_TIME), std::bind(&FakeImuNode::timeout_callback,this));
+            pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000/publishing_freq), std::bind(&FakeImuNode::pub_callback,this));
+            timeout_timer_ = this->create_wall_timer(std::chrono::seconds(run_time), std::bind(&FakeImuNode::timeout_callback,this));
 
             // Init 
             this->R_<<1,0,0,
                       0,1,0,
                       0,0,1;
-            this->gravity_ << 0,0,-9.81;
+            if(gravity_switch)
+            {
+                this->gravity_ << 0,0,9.81;
+            }
+            else
+            {
+                this->gravity_ << 0,0,0;
+            }
             this->fake_a_ << 0,0,0;
             this->fake_g_ << 0,0,0;
 
             this->msg_tick = 0;
 
+            /*
             a_.value << 0,0,0;
             a_.noise_mean << -0.139, 0.0291, -0.21;
             a_.noise_standard_dev << 0.0463, 0.05, 0.043;
@@ -64,7 +84,17 @@ class FakeImuNode : public rclcpp::Node
             
             g_.noise_mean << -0.0012,-0.0007, -0.0004;
             g_.noise_standard_dev << 0.0089,0.0081,0.0083;
+            */
 
+            a_.value << 0.00,0,0; //1,1,1;
+            a_.noise_mean << 0,0,0;
+            a_.noise_standard_dev << 0,0,0;
+            a_.bias_mean << 0,0,0;
+            a_.bias_standard_dev <<0,0,0;
+            
+            g_.value <<0, 0, 0; //0, M_PI*0.1,0;
+            g_.noise_mean << 0,0,0;
+            g_.noise_standard_dev << 0,0,0;
         
             RCLCPP_INFO_STREAM(this->get_logger(),"\nParameters:\n"<<
                                 "Accelerometer:\n"<<
@@ -99,9 +129,14 @@ class FakeImuNode : public rclcpp::Node
                 lowstate_msg.imu_state.gyroscope[i] = fake_g_[i];
             }
 
-            this->msg_tick = this->msg_tick + (1.0/PUBLISHING_FREQ)*1000;
+            this->msg_tick = this->msg_tick + (1.0/publishing_freq)*1000;
 
             lowstate_msg.tick = this->msg_tick;
+
+            lowstate_msg.imu_state.quaternion[0] = q.x();
+            lowstate_msg.imu_state.quaternion[1] = q.y();
+            lowstate_msg.imu_state.quaternion[2] = q.z();
+            lowstate_msg.imu_state.quaternion[3] = q.w();
 
             lowstate_publisher_->publish(lowstate_msg);       
         }
@@ -126,13 +161,18 @@ class FakeImuNode : public rclcpp::Node
                 g_.bias[i] = get_rand(g_.bias_mean[i],g_.bias_standard_dev[i]);
             }
 
+            
             // fill out
-            fake_a_ = a_.value + a_.bias - ( R_ * gravity_) + a_.noise ;
+            fake_a_ = a_.value + a_.bias - ( R_.transpose() * gravity_) + a_.noise ;
             fake_g_ = g_.value + g_.bias + g_.noise; 
+            q = R_;
 
-            if(DEBUG)
+            Eigen::Vector3d phi = fake_g_*(1.0/publishing_freq); 
+            R_ = R_ * this->Exp_SO3(phi) ;
+
+            if(debug_switch)
             {
-                RCLCPP_INFO_STREAM(this->get_logger(),"Value sent:\nAccel:\n" << fake_a_.transpose() << "\nGyro:\n" << fake_g_.transpose());
+                RCLCPP_INFO_STREAM(this->get_logger(),"Value sent:\nAccel:\n" << fake_a_.transpose() << "\nGyro:\n" << fake_g_.transpose() << "\nRotation:\n" << R_ <<"\n norm acc: "<< fake_a_.norm());
             }
             
         }
@@ -148,7 +188,34 @@ class FakeImuNode : public rclcpp::Node
             return sample;
         }
 
+        Eigen::Matrix3d Exp_SO3(const Eigen::Vector3d& w) {
+            // Computes the vectorized exponential map for SO(3)
+            Eigen::Matrix3d A = this->skew(w);
+            double theta = w.norm();
+            if (theta < TOLERANCE) {
+                return Eigen::Matrix3d::Identity();
+            } 
+            Eigen::Matrix3d R =  Eigen::Matrix3d::Identity() + (sin(theta)/theta)*A + ((1-cos(theta))/(theta*theta))*A*A;
+            return R;
+        }
+
+        const double TOLERANCE = 1e-10;
+
+        Eigen::Matrix3d skew(const Eigen::Vector3d& v) {
+            // Convert vector to skew-symmetric matrix
+            Eigen::Matrix3d M = Eigen::Matrix3d::Zero();
+            M << 0, -v[2], v[1],
+                v[2], 0, -v[0], 
+                -v[1], v[0], 0;
+                return M;
+        }
+
         // Attributes ==========================================================
+        int gravity_switch;
+        int debug_switch;
+        int publishing_freq;
+        int run_time;
+
         rclcpp::Publisher<unitree_go::msg::LowState>::SharedPtr lowstate_publisher_;
         rclcpp::TimerBase::SharedPtr pub_timer_;
         rclcpp::TimerBase::SharedPtr timeout_timer_;
@@ -160,7 +227,7 @@ class FakeImuNode : public rclcpp::Node
         ImuOutput a_;
         ImuOutput g_;
         int msg_tick;
-
+        Eigen::Quaterniond q;
 
 
 };
