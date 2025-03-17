@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(unitree_go REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 
 add_executable(fake_imu_node src/fake_imu.cpp)
@@ -21,6 +22,7 @@ target_link_libraries(fake_imu_node
 ament_target_dependencies(fake_imu_node
                           unitree_go
                           rclcpp
+                          tf2_ros
                           )
 
 install(TARGETS 

@@ -1,6 +1,10 @@
 #include "unitree_go/msg/low_state.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <Eigen/Dense>
+
+#include "tf2_ros/transform_broadcaster.h"
+#include "geometry_msgs/msg/quaternion.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include <random>
 
 #include <math.h>
@@ -40,7 +44,7 @@ class FakeImuNode : public rclcpp::Node
         : Node("fake_imu")
         {
             this->declare_parameter("gravity", 1);
-            this->declare_parameter("debug", 1);
+            this->declare_parameter("debug", 0);
             this->declare_parameter("pub_freq", 500);
             this->declare_parameter("run_time", 10);
 
@@ -48,6 +52,7 @@ class FakeImuNode : public rclcpp::Node
             this->debug_switch = this->get_parameter("debug").as_int();
             this->publishing_freq = this->get_parameter("pub_freq").as_int();
             this->run_time = this->get_parameter("run_time").as_int();
+
 
             RCLCPP_INFO_STREAM(this->get_logger(),"\nGo2 fake IMU lanched with parameters:\n"<<
             "Publishing Frequency: "<< publishing_freq << "Hz\n"<<
@@ -57,6 +62,7 @@ class FakeImuNode : public rclcpp::Node
             lowstate_publisher_ = this->create_publisher<unitree_go::msg::LowState>("lowstate",10);
             pub_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000/publishing_freq), std::bind(&FakeImuNode::pub_callback,this));
             timeout_timer_ = this->create_wall_timer(std::chrono::seconds(run_time), std::bind(&FakeImuNode::timeout_callback,this));
+            tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
             // Init 
             this->R_<<1,0,0,
@@ -86,13 +92,13 @@ class FakeImuNode : public rclcpp::Node
             g_.noise_standard_dev << 0.0089,0.0081,0.0083;
             */
 
-            a_.value << 0.00,0,0; //1,1,1;
+            a_.value << 0,0,0; //1,1,1;
             a_.noise_mean << 0,0,0;
             a_.noise_standard_dev << 0,0,0;
             a_.bias_mean << 0,0,0;
             a_.bias_standard_dev <<0,0,0;
             
-            g_.value <<0, 0, 0; //0, M_PI*0.1,0;
+            g_.value <<  M_PI*0.1,0, 0; //0, M_PI*0.1,0;
             g_.noise_mean << 0,0,0;
             g_.noise_standard_dev << 0,0,0;
         
@@ -138,7 +144,22 @@ class FakeImuNode : public rclcpp::Node
             lowstate_msg.imu_state.quaternion[2] = q.z();
             lowstate_msg.imu_state.quaternion[3] = q.w();
 
-            lowstate_publisher_->publish(lowstate_msg);       
+            lowstate_publisher_->publish(lowstate_msg);   
+
+            geometry_msgs::msg::TransformStamped t_;            
+            t_.header.stamp = this->get_clock()->now();
+            t_.header.frame_id = "map";
+            t_.child_frame_id = "base";
+
+
+
+            t_.transform.rotation.x = q.x();
+            t_.transform.rotation.y = q.y();
+            t_.transform.rotation.z = q.z();
+            t_.transform.rotation.w = q.w();
+
+            // Send the transformation
+            tf_broadcaster_->sendTransform(t_);    
         }
 
         void timeout_callback()
@@ -219,6 +240,7 @@ class FakeImuNode : public rclcpp::Node
         rclcpp::Publisher<unitree_go::msg::LowState>::SharedPtr lowstate_publisher_;
         rclcpp::TimerBase::SharedPtr pub_timer_;
         rclcpp::TimerBase::SharedPtr timeout_timer_;
+        std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
         Eigen::Matrix3d R_;
         Eigen::Vector3d gravity_;
